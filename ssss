@@ -1,0 +1,111 @@
+import pandas as pd
+
+def _unit_col(unit: str) -> str:
+    m = {
+        "seconds": "difdate_in_sec",
+        "minutes": "diffdate_in_mute",
+        "hours":   "diffdate_in_hours",
+        "days":    "diffdate_in_day",
+    }
+    if unit not in m:
+        raise ValueError("unit must be one of: 'seconds', 'minutes', 'hours', 'days'")
+    return m[unit]
+
+def make_ops_presence_order(sorted_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return a 2-column DataFrame listing (lotnumber, op_label) in the order they appear
+    in `sorted_df`. op_label is normalized (e.g., '1020-5001').
+    """
+    if "lotnumber" not in sorted_df.columns or "OperationtoOp" not in sorted_df.columns:
+        raise KeyError("sorted_df must contain 'lotnumber' and 'OperationtoOp'.")
+
+    out = sorted_df[["lotnumber", "OperationtoOp"]].copy()
+    out["op_label"] = out["OperationtoOp"].astype(str).str.replace(" ", "", regex=False)
+    return out[["lotnumber", "op_label"]]
+
+def make_lot_summary_table(sorted_df: pd.DataFrame,
+                           unit: str = "hours",
+                           include_only_ops: list[str] | None = None) -> pd.DataFrame:
+    """
+    Build a per-lot KPI table with columns:
+      lotnumber | numberwafer | Total_time | <op1> | <op2> | ...
+    - Row order = first appearance of lot in `sorted_df`
+    - Operation columns ordered by first appearance across lots in `sorted_df`
+    - unit in {'seconds','minutes','hours','days'}
+    - If include_only_ops is provided, only those ops (order preserved) are shown
+    """
+    val_col = _unit_col(unit)
+
+    req = {"lotnumber", "OperationtoOp", val_col}
+    missing = req - set(sorted_df.columns)
+    if missing:
+        raise KeyError(f"sorted_df missing required columns: {missing}")
+
+    df = sorted_df.copy()
+
+    # Normalize op label (remove spaces)
+    df["op_label"] = df["OperationtoOp"].astype(str).str.replace(" ", "", regex=False)
+
+    # Determine row (lot) order from first appearance
+    lot_order = df["lotnumber"].drop_duplicates(keep="first").tolist()
+
+    # Determine op column order from first appearance (or use provided list)
+    if include_only_ops is None:
+        op_order = df["op_label"].drop_duplicates(keep="first").tolist()
+    else:
+        # Normalize user-specified ops and keep those present
+        present = set(df["op_label"].unique())
+        op_order = [str(o).replace(" ", "") for o in include_only_ops if str(o).replace(" ", "") in present]
+        if not op_order:
+            raise ValueError("None of include_only_ops are present in sorted_df.")
+
+    # numberwafer/wafernumber source (the summary should show one value per lot)
+    wafer_col = None
+    if "numberwafer" in df.columns:
+        wafer_col = "numberwafer"
+    elif "wafernumber" in df.columns:
+        wafer_col = "wafernumber"
+    # If neither is present, we will fill numberwafer as NA later.
+
+    # Pivot sum by lot x op
+    pivot = df.pivot_table(index="lotnumber",
+                           columns="op_label",
+                           values=val_col,
+                           aggfunc="sum",
+                           fill_value=0)
+
+    # Ensure all desired ops exist as columns (create zero columns for missing)
+    for col in op_order:
+        if col not in pivot.columns:
+            pivot[col] = 0
+
+    # Total_time across all ops present for that lot
+    pivot["Total_time"] = pivot.sum(axis=1)
+
+    # Attach numberwafer per lot (take first non-null if present)
+    if wafer_col:
+        wafers = df.groupby("lotnumber")[wafer_col].first()
+        pivot = pivot.join(wafers.rename("numberwafer"))
+    else:
+        pivot["numberwafer"] = pd.NA
+
+    # Final column ordering: lotnumber, numberwafer, Total_time, then op columns
+    pivot = pivot[["numberwafer", "Total_time"] + op_order].reset_index()
+
+    return pivot
+
+# -----------------------------
+# Example usage in your notebook
+# -----------------------------
+# 1) The “order guide” that shows how ops appear (by lot) in sorted_df:
+ops_order_table = make_ops_presence_order(sorted_df)
+display(ops_order_table)  # shows rows like: lot | 1020-5001, lot | 5001-5001, ...
+
+# 2) The final KPI table (columns in the order discovered above)
+kpi = make_lot_summary_table(sorted_df, unit="hours")
+display(kpi)
+
+# If you want to restrict to specific operation columns (and their order), do:
+# kpi_custom = make_lot_summary_table(sorted_df, unit="hours",
+#                                     include_only_ops=["1020-5001", "5001-5001"])
+# display(kpi_custom)
