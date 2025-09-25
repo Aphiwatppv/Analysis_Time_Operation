@@ -1,0 +1,14 @@
+# Make sure from_time/to_time are sortable as datetimes
+result_df["FROM_DT"] = pd.to_datetime(result_df["from_time"], format="%d.%m.%Y %H:%M:%S", errors="coerce")
+result_df["TO_DT"]   = pd.to_datetime(result_df["to_time"],   format="%d.%m.%Y %H:%M:%S", errors="coerce")
+
+# Group-by lot (implicitly) by sorting first by lotnumber, then by time
+sorted_df = (result_df
+             .sort_values(["lotnumber", "FROM_DT", "TO_DT"])
+             .drop(columns=["FROM_DT", "TO_DT"])
+             .reset_index(drop=True))
+
+# If you want to SEE each lot’s section in order:
+for lot, grp in sorted_df.groupby("lotnumber", sort=False):
+    print(f"\n=== {lot} ===")
+    print(grp.to_string(index=False))
