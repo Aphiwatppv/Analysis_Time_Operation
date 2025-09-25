@@ -1,0 +1,31 @@
+---------------------------------------------------------------------------
+KeyError                                  Traceback (most recent call last)
+Cell In[37], line 23
+     19     return runs
+     21 rows = []
+---> 23 for lot, lot_grp in df.groupby("lotnumber"):
+     24     runs = build_runs(lot_grp)
+     26     # Intra-run (e.g. 5001 → 5001)
+
+File c:\Users\Deelom\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\frame.py:9183, in DataFrame.groupby(self, by, axis, level, as_index, sort, group_keys, observed, dropna)
+   9180 if level is None and by is None:
+   9181     raise TypeError("You have to supply one of 'by' and 'level'")
+-> 9183 return DataFrameGroupBy(
+   9184     obj=self,
+   9185     keys=by,
+   9186     axis=axis,
+   9187     level=level,
+   9188     as_index=as_index,
+   9189     sort=sort,
+   9190     group_keys=group_keys,
+   9191     observed=observed,
+   9192     dropna=dropna,
+   9193 )
+
+File c:\Users\Deelom\AppData\Local\Programs\Python\Python313\Lib\site-packages\pandas\core\groupby\groupby.py:1329, in GroupBy.__init__(self, obj, keys, axis, level, grouper, exclusions, selection, as_index, sort, group_keys, observed, dropna)
+...
+   1044 elif isinstance(gpr, Grouper) and gpr.key is not None:
+   1045     # Add key to exclusions
+   1046     exclusions.add(gpr.key)
+
+KeyError: 'lotnumber'
