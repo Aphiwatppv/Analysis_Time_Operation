@@ -1,0 +1,65 @@
+# --- Input ---
+csv_path = "mock_trigger_data.csv"  # change to your CSV path
+
+# --- Load & prep ---
+df = pd.read_csv(csv_path)
+df["TRIGGER_DATE"] = pd.to_datetime(df["TRIGGER_DATE"], format="%d.%m.%Y %H:%M:%S", errors="coerce")
+df = df.sort_values(["LOTNUMBER", "TRIGGER_DATE", "TRIGGER_ID"]).reset_index(drop=True)
+
+def build_runs(group: pd.DataFrame) -> pd.DataFrame:
+    # Mark contiguous runs of the same CURRENT_OPERATION
+    change = (group["CURRENT_OPERATION"] != group["CURRENT_OPERATION"].shift()).cumsum()
+    runs = (
+        group.assign(run_id=change)
+             .groupby("run_id", as_index=False)
+             .agg(
+                 LOTNUMBER=("LOTNUMBER", "first"),
+                 CURRENT_OPERATION=("CURRENT_OPERATION", "first"),
+                 NUMBERWAFER=("NUMBERWAFER", "first"),
+                 start_time=("TRIGGER_DATE", "first"),
+                 end_time=("TRIGGER_DATE", "last"),
+                 count=("TRIGGER_ID", "count"),
+             )
+    )
+    return runs
+
+rows = []
+
+for lot, lot_grp in df.groupby("LOTNUMBER"):
+    runs = build_runs(lot_grp)
+
+    # 1) Intra-run: op - op (first to last within the same run), only if there are duplicates
+    for _, r in runs.iterrows():
+        if r["count"] > 1:
+            delta = r["end_time"] - r["start_time"]
+            rows.append({
+                "lotnumber": r["LOTNUMBER"],
+                "OperationtoOp": f"{r['CURRENT_OPERATION']} - {r['CURRENT_OPERATION']}",
+                "wafernumber": r["NUMBERWAFER"],
+                "difdate_in_sec": int(delta.total_seconds()),
+                "diffdate_in_mute": round(delta.total_seconds() / 60.0, 3),
+                "diffdate_in_hours": round(delta.total_seconds() / 3600.0, 3),
+                "diffdate_in_day": round(delta.total_seconds() / 86400.0, 6),
+                "from_time": r["start_time"].strftime("%d.%m.%Y %H:%M:%S"),
+                "to_time": r["end_time"].strftime("%d.%m.%Y %H:%M:%S"),
+            })
+
+    # 2) Inter-run: prev_op - next_op (next.start - prev.end)
+    for i in range(len(runs) - 1):
+        prev_run = runs.iloc[i]
+        next_run = runs.iloc[i + 1]
+        delta = next_run["start_time"] - prev_run["end_time"]
+        rows.append({
+            "lotnumber": prev_run["LOTNUMBER"],
+            "OperationtoOp": f"{prev_run['CURRENT_OPERATION']} - {next_run['CURRENT_OPERATION']}",
+            "wafernumber": prev_run["NUMBERWAFER"],
+            "difdate_in_sec": int(delta.total_seconds()),
+            "diffdate_in_mute": round(delta.total_seconds() / 60.0, 3),
+            "diffdate_in_hours": round(delta.total_seconds() / 3600.0, 3),
+            "diffdate_in_day": round(delta.total_seconds() / 86400.0, 6),
+            "from_time": prev_run["end_time"].strftime("%d.%m.%Y %H:%M:%S"),
+            "to_time": next_run["start_time"].strftime("%d.%m.%Y %H:%M:%S"),
+        })
+
+result_df = pd.DataFrame(rows).sort_values(["lotnumber", "from_time", "to_time"]).reset_index(drop=True)
+result_df
