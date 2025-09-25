@@ -1,0 +1,85 @@
+import pandas as pd
+
+def lot_kpi_from_sorted(sorted_df: pd.DataFrame,
+                        unit: str = "hours",                 # "seconds" | "minutes" | "hours" | "days"
+                        ops: list[str] | None = None,        # e.g. ["1020-5001", "5001-5001"]; if None, include all
+                        decimals: int = 3,
+                        total_over_all_ops: bool = True      # True: Total_time = sum over all ops present
+                        ) -> pd.DataFrame:
+    """
+    Build a per-lot KPI table from `sorted_df`:
+      - Row order follows first appearance of each lot in `sorted_df`
+      - Columns: 'lotnumber', 'Total_time', then one column per operation pair ('1020-5001', '5001-5001', ...)
+      - Values aggregated in chosen time unit
+    """
+    # Map unit -> column name
+    unit_col_map = {
+        "seconds": "difdate_in_sec",
+        "minutes": "diffdate_in_mute",
+        "hours":   "diffdate_in_hours",
+        "days":    "diffdate_in_day",
+    }
+    if unit not in unit_col_map:
+        raise ValueError("unit must be one of: 'seconds', 'minutes', 'hours', 'days'")
+    val_col = unit_col_map[unit]
+
+    # Basic checks
+    req = {"lotnumber", "OperationtoOp", val_col}
+    missing = req - set(sorted_df.columns)
+    if missing:
+        raise KeyError(f"sorted_df missing required columns: {missing}")
+
+    df = sorted_df.copy()
+
+    # Clean operation labels to '1020-5001' style (remove spaces)
+    df["op_label"] = df["OperationtoOp"].astype(str).str.replace(" ", "", regex=False)
+
+    # Keep lot row order as in sorted_df (first appearance)
+    lot_order = df["lotnumber"].drop_duplicates(keep="first").tolist()
+
+    # If a subset of ops is requested, enforce that order; otherwise derive order by first appearance
+    if ops is None:
+        op_order = df["op_label"].drop_duplicates(keep="first").tolist()
+    else:
+        # Normalize user-specified ops (remove spaces just in case)
+        ops_clean = [str(o).replace(" ", "") for o in ops]
+        # Keep only ops that actually exist; warn if none found
+        present = set(df["op_label"].unique())
+        op_order = [o for o in ops_clean if o in present]
+        if not op_order:
+            raise ValueError("None of the requested ops are present in sorted_df.")
+
+    # Pivot per lot per operation
+    pivot = df.pivot_table(index="lotnumber",
+                           columns="op_label",
+                           values=val_col,
+                           aggfunc="sum",
+                           fill_value=0)
+
+    # Ensure all requested ops exist as columns (create missing with zeros)
+    for col in op_order:
+        if col not in pivot.columns:
+            pivot[col] = 0
+
+    # Total_time
+    if total_over_all_ops:
+        # sum over all available ops
+        pivot["Total_time"] = pivot.sum(axis=1)
+    else:
+        # sum only over selected ops
+        pivot["Total_time"] = pivot[op_order].sum(axis=1)
+
+    # Column ordering
+    pivot = pivot[["Total_time"] + op_order]
+
+    # Row ordering: follow lot appearance in sorted_df
+    pivot = pivot.reindex(lot_order)
+
+    # Final tidy table
+    out = pivot.reset_index()
+
+    # Round numeric columns
+    num_cols = [c for c in out.columns if c != "lotnumber"]
+    out[num_cols] = out[num_cols].round(decimals)
+
+    return out
