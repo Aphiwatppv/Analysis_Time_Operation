@@ -1,0 +1,80 @@
+import pandas as pd
+
+def make_lot_kpi_table(softed_df: pd.DataFrame,
+                       unit: str = "hours",    # "seconds" | "minutes" | "hours" | "days"
+                       decimals: int = 3,
+                       to_hms: bool = False,   # if True, format as HH:MM:SS (seconds/minutes/hours only)
+                       op_order: list[str] | None = None) -> pd.DataFrame:
+    """
+    Build a pivot summary:
+      index  -> lotnumber
+      cols   -> OperationtoOp (e.g., '1020 - 5001', '5001 - 5001', ...)
+      values -> sum of durations in the chosen unit
+    Adds a 'Total_time' column (sum across all OperationtoOp for each lot).
+    """
+    if unit not in {"seconds", "minutes", "hours", "days"}:
+        raise ValueError("unit must be one of: 'seconds', 'minutes', 'hours', 'days'")
+
+    # Map unit -> column in softed_df
+    unit_col_map = {
+        "seconds": "difdate_in_sec",
+        "minutes": "diffdate_in_mute",
+        "hours":   "diffdate_in_hours",
+        "days":    "diffdate_in_day",
+    }
+    value_col = unit_col_map[unit]
+
+    # Defensive copy and ensure needed cols exist
+    df = softed_df.copy()
+    required_cols = {"lotnumber", "OperationtoOp", value_col}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise KeyError(f"Missing columns in softed_df: {missing}")
+
+    # Build pivot (sum per lot per OperationtoOp)
+    pivot = df.pivot_table(index="lotnumber",
+                           columns="OperationtoOp",
+                           values=value_col,
+                           aggfunc="sum",
+                           fill_value=0)
+
+    # Add Total_time (sum across operation columns)
+    pivot["Total_time"] = pivot.sum(axis=1)
+
+    # Reorder columns: Total_time first, then OperationtoOp columns
+    if op_order is None:
+        # Default: alphabetical order of operation pairs
+        op_cols = [c for c in pivot.columns if c != "Total_time"]
+        op_cols = sorted(op_cols, key=lambda x: str(x))
+    else:
+        # Use provided order; include any remaining unseen ops at the end
+        known = set(pivot.columns)
+        op_cols = [c for c in op_order if c in known and c != "Total_time"]
+        rest = [c for c in pivot.columns if c not in op_cols and c != "Total_time"]
+        op_cols += sorted(rest, key=lambda x: str(x))
+
+    pivot = pivot[["Total_time"] + op_cols].reset_index()
+
+    # Round numeric values
+    if not to_hms:
+        num_cols = [c for c in pivot.columns if c != "lotnumber"]
+        pivot[num_cols] = pivot[num_cols].round(decimals)
+        return pivot
+
+    # Optional HH:MM:SS formatting (convert chosen unit to seconds first)
+    if unit not in {"seconds", "minutes", "hours"}:
+        raise ValueError("to_hms=True only makes sense for 'seconds', 'minutes', or 'hours'.")
+
+    factor = {"seconds": 1, "minutes": 60, "hours": 3600}[unit]
+
+    def _fmt_hms(x):
+        total_seconds = int(round(float(x) * factor))
+        h = total_seconds // 3600
+        m = (total_seconds % 3600) // 60
+        s = total_seconds % 60
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    for col in [c for c in pivot.columns if c != "lotnumber"]:
+        pivot[col] = pivot[col].apply(_fmt_hms)
+
+    return pivot
