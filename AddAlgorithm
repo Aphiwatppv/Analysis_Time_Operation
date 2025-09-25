@@ -1,0 +1,127 @@
+import pandas as pd
+
+lot_ids = ['ZA523125', 'ZA518397', 'ZA525223']
+
+# --- Build Oracle-friendly bind placeholders for IN (...) ---
+placeholders = ",".join([f":lot{i}" for i in range(len(lot_ids))])
+params = {f"lot{i}": v for i, v in enumerate(lot_ids)}
+
+SqlScript = f"""
+SELECT
+    TRIGGER_ID,
+    lotnumber,
+    trigger_date,
+    numberwafer,
+    cometsopnumber AS current_operation,
+    production_area
+FROM trigger_table
+WHERE lotnumber IN ({placeholders})
+  AND NVL(cometsopnumber, '(null)') != '(null)'
+ORDER BY trigger_date ASC
+"""
+
+# --- Query ---
+try:
+    df = pd.read_sql(SqlScript, con=connectionALF, params=params)
+except Exception as e:
+    print("An error occurred while executing the SQL query or managing the database connection.")
+    print(f"Error details: {e}")
+    raise  # stop here so we don't keep using an undefined/invalid df
+
+# --- Normalize columns and datetimes ---
+df.columns = [c.strip().upper() for c in df.columns]
+
+expected = {
+    "TRIGGER_ID": "TRIGGER_ID",
+    "LOTNUMBER": "LOTNUMBER",
+    "TRIGGER_DATE": "TRIGGER_DATE",
+    "NUMBERWAFER": "NUMBERWAFER",
+    "CURRENT_OPERATION": "CURRENT_OPERATION",
+    "PRODUCTION_AREA": "PRODUCTION_AREA",
+}
+missing = [k for k in expected if k not in df.columns]
+if missing:
+    raise KeyError(f"Missing expected columns after normalization: {missing}. "
+                   f"Got columns: {list(df.columns)}")
+
+# If the driver returned strings like '04.09.2025 11:13:54', parse them.
+# If it's already datetime from Oracle, this is a no-op.
+if not pd.api.types.is_datetime64_any_dtype(df["TRIGGER_DATE"]):
+    df["TRIGGER_DATE"] = pd.to_datetime(
+        df["TRIGGER_DATE"], format="%d.%m.%Y %H:%M:%S", errors="coerce"
+    )
+
+# Sort to make sure events are in order within each lot
+df = df.sort_values(["LOTNUMBER", "TRIGGER_DATE", "TRIGGER_ID"]).reset_index(drop=True)
+
+# --- Build contiguous runs per lot (keeps 5001→5001 as a single span) ---
+def build_runs(group: pd.DataFrame) -> pd.DataFrame:
+    change = (group["CURRENT_OPERATION"] != group["CURRENT_OPERATION"].shift()).cumsum()
+    runs = (
+        group.assign(RUN_ID=change)
+             .groupby("RUN_ID", as_index=False)
+             .agg(
+                 LOTNUMBER=("LOTNUMBER", "first"),
+                 CURRENT_OPERATION=("CURRENT_OPERATION", "first"),
+                 NUMBERWAFER=("NUMBERWAFER", "first"),
+                 START_TIME=("TRIGGER_DATE", "first"),
+                 END_TIME=("TRIGGER_DATE", "last"),
+                 COUNT=("TRIGGER_ID", "count"),
+             )
+    )
+    return runs
+
+rows = []
+
+for lot, lot_grp in df.groupby("LOTNUMBER", sort=False):
+    runs = build_runs(lot_grp)
+
+    # A) Intra-run duration: op - op (first → last within same run)
+    for _, r in runs.iterrows():
+        if r["COUNT"] > 1:
+            delta = r["END_TIME"] - r["START_TIME"]
+            rows.append({
+                "lotnumber": r["LOTNUMBER"],
+                "OperationtoOp": f"{r['CURRENT_OPERATION']} - {r['CURRENT_OPERATION']}",
+                "wafernumber": r["NUMBERWAFER"],
+                "difdate_in_sec": int(delta.total_seconds()),
+                "diffdate_in_mute": round(delta.total_seconds() / 60.0, 3),
+                "diffdate_in_hours": round(delta.total_seconds() / 3600.0, 3),
+                "diffdate_in_day": round(delta.total_seconds() / 86400.0, 6),
+                "from_time": r["START_TIME"].strftime("%d.%m.%Y %H:%M:%S"),
+                "to_time": r["END_TIME"].strftime("%d.%m.%Y %H:%M:%S"),
+            })
+
+    # B) Inter-run transition: prev_op - next_op (next.start − prev.end)
+    for i in range(len(runs) - 1):
+        prev_run, next_run = runs.iloc[i], runs.iloc[i + 1]
+        delta = next_run["START_TIME"] - prev_run["END_TIME"]
+        rows.append({
+            "lotnumber": prev_run["LOTNUMBER"],
+            "OperationtoOp": f"{prev_run['CURRENT_OPERATION']} - {next_run['CURRENT_OPERATION']}",
+            "wafernumber": prev_run["NUMBERWAFER"],
+            "difdate_in_sec": int(delta.total_seconds()),
+            "diffdate_in_mute": round(delta.total_seconds() / 60.0, 3),
+            "diffdate_in_hours": round(delta.total_seconds() / 3600.0, 3),
+            "diffdate_in_day": round(delta.total_seconds() / 86400.0, 6),
+            "from_time": prev_run["END_TIME"].strftime("%d.%m.%Y %H:%M:%S"),
+            "to_time": next_run["START_TIME"].strftime("%d.%m.%Y %H:%M:%S"),
+        })
+
+# --- Build result_df and sort "grouped by lot, then by time" ---
+result_df = pd.DataFrame(rows)
+
+# If there are no rows (e.g., single event per run and no transitions), handle gracefully
+if result_df.empty:
+    print("No transitions found for the given lots.")
+else:
+    result_df["FROM_DT"] = pd.to_datetime(result_df["from_time"], format="%d.%m.%Y %H:%M:%S", errors="coerce")
+    result_df["TO_DT"]   = pd.to_datetime(result_df["to_time"],   format="%d.%m.%Y %H:%M:%S", errors="coerce")
+    sorted_df = (
+        result_df
+        .sort_values(["lotnumber", "FROM_DT", "TO_DT"])
+        .drop(columns=["FROM_DT", "TO_DT"])
+        .reset_index(drop=True)
+    )
+    print(sorted_df)
+    # sorted_df.to_csv("operation_transitions_with_hours.csv", index=False)
