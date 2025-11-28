@@ -1,0 +1,28 @@
+1. FI: Drive stability and quality with <0.1% moves lost
+
+Exceeding: Move lost ≤ 0.08%
+
+Meet: Move lost ≤ 0.10%
+
+Partial Meet: Move lost ≤ 0.15%
+
+Not Meet: Move lost > 0.15%
+
+2. FI MDI OPS Target:
+i. Stability: High impact outages, max. 15 occurrences for all OPS-supported applications (MC-A & MC-C) (Weightage: 70%) (FY2425 (20) with new services taken over)
+
+Exceeding: < 15
+
+Meet: = 15
+
+Partial Meet: 16–20
+
+Not Meet: > 20
+
+ii. Stability: All major incidents with Mean Time Between Failure (MTBF) at least 18 days (Weightage: 30%) (FY2425 (14) with new services taken over)
+
+Exceeding: > 18 days
+
+Meet: = 18 days
+
+Not Meet: < 18 days
