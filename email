@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 
 import os
+import tarfile
 import shutil
-from datetime import datetime
 
 def main():
-    print("=== Flexible File Copy Tool (With Confirmation) ===\n")
+    print("=== Extract .tar.gz and Move Result ===\n")
 
-    source_dir = input("Enter SOURCE directory path: ").strip()
-    dest_dir   = input("Enter DESTINATION directory path: ").strip()
+    source_dir = input("Enter SOURCE directory (contains .tar.gz): ").strip()
+    dest_dir   = input("Enter DESTINATION directory: ").strip()
 
     if not os.path.isdir(source_dir):
         print("❌ Source directory does not exist")
@@ -16,93 +16,61 @@ def main():
 
     os.makedirs(dest_dir, exist_ok=True)
 
-    # Optional filters
-    use_time_filter = input("Filter by modified time? (y/n): ").strip().lower() == "y"
-    if use_time_filter:
-        start_time = input("Enter START time (YYYY-MM-DD HH:MM:SS): ").strip()
-        end_time   = input("Enter END time   (YYYY-MM-DD HH:MM:SS): ").strip()
-        start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
-        end_dt   = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
-    else:
-        start_dt = end_dt = None
+    # Find .tar.gz files
+    tar_files = [
+        f for f in os.listdir(source_dir)
+        if f.endswith(".tar.gz") and os.path.isfile(os.path.join(source_dir, f))
+    ]
 
-    keyword = input("Filename MUST CONTAIN (press Enter to skip): ").strip()
-    keyword = keyword if keyword else None
-
-    ext = input("File extension filter (e.g. .gz, press Enter to skip): ").strip()
-    ext = ext if ext else None
-
-    preserve_structure = input("Preserve directory structure? (y/n): ").strip().lower() == "y"
-
-    print("\n🔍 Scanning files...")
-
-    matched_files = []
-
-    for root, _, files in os.walk(source_dir):
-        for filename in files:
-            if ext and not filename.endswith(ext):
-                continue
-            if keyword and keyword not in filename:
-                continue
-
-            src_path = os.path.join(root, filename)
-
-            if use_time_filter:
-                mtime = datetime.fromtimestamp(os.path.getmtime(src_path))
-                if not (start_dt <= mtime <= end_dt):
-                    continue
-
-            matched_files.append(src_path)
-
-    if not matched_files:
-        print("⚠️ No files matched the criteria.")
+    if not tar_files:
+        print("⚠️ No .tar.gz files found.")
         return
 
     # ===== Summary =====
-    print("\n========== COPY SUMMARY ==========")
-    print(f"Source directory      : {source_dir}")
-    print(f"Destination directory : {dest_dir}")
-    print(f"Total files to copy   : {len(matched_files)}")
+    print("\n========== SUMMARY ==========")
+    print(f"Source directory : {source_dir}")
+    print(f"Destination      : {dest_dir}")
+    print(f"Archives found   : {len(tar_files)}")
+    print("============================\n")
 
-    if use_time_filter:
-        print(f"Modified between      : {start_dt}  →  {end_dt}")
-    else:
-        print("Modified time filter  : Disabled")
+    for f in tar_files:
+        print(f" - {f}")
 
-    print(f"Filename contains     : {keyword or 'Any'}")
-    print(f"File extension        : {ext or 'Any'}")
-    print(f"Preserve structure    : {'Yes' if preserve_structure else 'No'}")
-    print("=================================\n")
-
-    # Optional file list preview
-    show_list = input("Show file list? (y/n): ").strip().lower() == "y"
-    if show_list:
-        for f in matched_files:
-            print(f" - {f}")
-
-    # Confirmation
-    confirm = input("\nProceed with copy? (y/n): ").strip().lower()
+    confirm = input("\nProceed with extraction and move? (y/n): ").strip().lower()
     if confirm != "y":
-        print("❌ Copy cancelled by user.")
+        print("❌ Operation cancelled.")
         return
 
-    # ===== Copy =====
-    print("\n🚀 Copying files...\n")
-    copied = 0
+    print("\n🚀 Processing archives...\n")
 
-    for src_path in matched_files:
-        if preserve_structure:
-            rel_path = os.path.relpath(src_path, source_dir)
-            dest_path = os.path.join(dest_dir, rel_path)
-            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        else:
-            dest_path = os.path.join(dest_dir, os.path.basename(src_path))
+    for tar_name in tar_files:
+        tar_path = os.path.join(source_dir, tar_name)
+        extract_folder = os.path.join(source_dir, tar_name.replace(".tar.gz", ""))
 
-        shutil.copy2(src_path, dest_path)
-        copied += 1
-        print(f"Copied: {src_path}")
+        print(f"📦 Extracting: {tar_name}")
 
-    print(f"\n✅ Copy completed. Total files copied: {copied}")
+        # Extract
+        with tarfile.open(tar_path, "r:gz") as tar:
+            tar.extractall(path=extract_folder)
+
+        # Move extracted content
+        for item in os.listdir(extract_folder):
+            src_path = os.path.join(extract_folder, item)
+            dest_path = os.path.join(dest_dir, item)
+
+            if os.path.exists(dest_path):
+                print(f"⚠️ Skipped (exists): {dest_path}")
+                continue
+
+            shutil.move(src_path, dest_path)
+            print(f"Moved: {item}")
+
+        # Cleanup extraction folder
+        shutil.rmtree(extract_folder)
+        print(f"🧹 Cleaned temp folder: {extract_folder}\n")
+
+    print("✅ All archives processed successfully.")
 
 if __name__ == "__main__":
     main()
+
