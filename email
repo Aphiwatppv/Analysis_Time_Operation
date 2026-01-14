@@ -1,8 +1,106 @@
-Hi Johannes,
+import os
+import shutil
+from datetime import datetime
 
-Thank you very much for your quick response and support.
+def main():
+    print("=== Flexible File Copy Tool (With Confirmation) ===\n")
 
-To comprehensively support the users, could you please help advise on their concern regarding why some lots contain basic type information while others are missing?
+    source_dir = input("Enter SOURCE directory path: ").strip()
+    dest_dir   = input("Enter DESTINATION directory path: ").strip()
 
-Best regards,
-Aphiwat D.
+    if not os.path.isdir(source_dir):
+        print("❌ Source directory does not exist")
+        return
+
+    os.makedirs(dest_dir, exist_ok=True)
+
+    # Optional filters
+    use_time_filter = input("Filter by modified time? (y/n): ").strip().lower() == "y"
+    if use_time_filter:
+        start_time = input("Enter START time (YYYY-MM-DD HH:MM:SS): ").strip()
+        end_time   = input("Enter END time   (YYYY-MM-DD HH:MM:SS): ").strip()
+        start_dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
+        end_dt   = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
+    else:
+        start_dt = end_dt = None
+
+    keyword = input("Filename MUST CONTAIN (press Enter to skip): ").strip()
+    keyword = keyword if keyword else None
+
+    ext = input("File extension filter (e.g. .gz, press Enter to skip): ").strip()
+    ext = ext if ext else None
+
+    preserve_structure = input("Preserve directory structure? (y/n): ").strip().lower() == "y"
+
+    print("\n🔍 Scanning files...")
+
+    matched_files = []
+
+    for root, _, files in os.walk(source_dir):
+        for filename in files:
+            if ext and not filename.endswith(ext):
+                continue
+            if keyword and keyword not in filename:
+                continue
+
+            src_path = os.path.join(root, filename)
+
+            if use_time_filter:
+                mtime = datetime.fromtimestamp(os.path.getmtime(src_path))
+                if not (start_dt <= mtime <= end_dt):
+                    continue
+
+            matched_files.append(src_path)
+
+    if not matched_files:
+        print("⚠️ No files matched the criteria.")
+        return
+
+    # ===== Summary =====
+    print("\n========== COPY SUMMARY ==========")
+    print(f"Source directory      : {source_dir}")
+    print(f"Destination directory : {dest_dir}")
+    print(f"Total files to copy   : {len(matched_files)}")
+
+    if use_time_filter:
+        print(f"Modified between      : {start_dt}  →  {end_dt}")
+    else:
+        print("Modified time filter  : Disabled")
+
+    print(f"Filename contains     : {keyword or 'Any'}")
+    print(f"File extension        : {ext or 'Any'}")
+    print(f"Preserve structure    : {'Yes' if preserve_structure else 'No'}")
+    print("=================================\n")
+
+    # Optional file list preview
+    show_list = input("Show file list? (y/n): ").strip().lower() == "y"
+    if show_list:
+        for f in matched_files:
+            print(f" - {f}")
+
+    # Confirmation
+    confirm = input("\nProceed with copy? (y/n): ").strip().lower()
+    if confirm != "y":
+        print("❌ Copy cancelled by user.")
+        return
+
+    # ===== Copy =====
+    print("\n🚀 Copying files...\n")
+    copied = 0
+
+    for src_path in matched_files:
+        if preserve_structure:
+            rel_path = os.path.relpath(src_path, source_dir)
+            dest_path = os.path.join(dest_dir, rel_path)
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        else:
+            dest_path = os.path.join(dest_dir, os.path.basename(src_path))
+
+        shutil.copy2(src_path, dest_path)
+        copied += 1
+        print(f"Copied: {src_path}")
+
+    print(f"\n✅ Copy completed. Total files copied: {copied}")
+
+if __name__ == "__main__":
+    main()
