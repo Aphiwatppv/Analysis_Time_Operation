@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+import os
+import shutil
+from datetime import datetime
+
+
+def unique_dest_path(dest_dir, name):
+    base, ext = os.path.splitext(name)
+    candidate = os.path.join(dest_dir, name)
+
+    if not os.path.exists(candidate):
+        return candidate
+
+    i = 1
+    while True:
+        new_name = f"{base}_dup{i}{ext}"
+        candidate = os.path.join(dest_dir, new_name)
+        if not os.path.exists(candidate):
+            return candidate
+        i += 1
+
+
+def ask_choice(title, options):
+    print(f"\n{title}")
+    for k, v in options.items():
+        print(f"  {k}. {v}")
+    while True:
+        choice = input("Select option: ").strip()
+        if choice in options:
+            return choice
+        print("❌ Invalid choice. Try again.")
+
+
+def main():
+    print("\n📦 Copy / Move Tool (Linux – User Friendly)\n")
+
+    mode = ask_choice(
+        "Select operation mode:",
+        {"1": "Move", "2": "Copy"}
+    )
+
+    target_type = ask_choice(
+        "Select target type:",
+        {"1": "Folders", "2": "Files"}
+    )
+
+    source_dir = input("\n📂 Source directory: ").strip()
+    dest_dir = input("📁 Destination directory: ").strip()
+    keywords_input = input("🔎 Keywords (comma-separated): ").strip()
+
+    if not source_dir or not dest_dir or not keywords_input:
+        print("❌ All fields are required.")
+        return
+
+    source_dir = os.path.abspath(source_dir)
+    dest_dir = os.path.abspath(dest_dir)
+    keywords = [k.strip().lower() for k in keywords_input.split(",") if k.strip()]
+
+    if not os.path.isdir(source_dir):
+        print(f"❌ Source directory not found: {source_dir}")
+        return
+
+    os.makedirs(dest_dir, exist_ok=True)
+
+    matches = []
+    total_size = 0
+
+    for entry in os.scandir(source_dir):
+        name_lower = entry.name.lower()
+
+        if not any(k in name_lower for k in keywords):
+            continue
+
+        if target_type == "1" and entry.is_dir(follow_symlinks=False):
+            matches.append(entry.path)
+        elif target_type == "2" and entry.is_file(follow_symlinks=False):
+            matches.append(entry.path)
+            total_size += entry.stat().st_size
+
+    if not matches:
+        print("\n⚠️ No matching items found.")
+        return
+
+    print("\n================= CONFIRMATION =================")
+    print(f"Operation   : {'MOVE' if mode == '1' else 'COPY'}")
+    print(f"Target Type : {'Folders' if target_type == '1' else 'Files'}")
+    print(f"Source Dir  : {source_dir}")
+    print(f"Dest Dir    : {dest_dir}")
+    print(f"Keywords    : {', '.join(keywords)}")
+    print(f"Items Found : {len(matches)}")
+
+    if target_type == "2":
+        print(f"Total Size  : {total_size / (1024*1024):.2f} MB")
+
+    print("\nItems:")
+    for i, p in enumerate(matches, 1):
+        print(f"  {i:>2}. {p}")
+
+    print("================================================")
+
+    confirm = input("\nProceed with this operation? (y/n): ").strip().lower()
+    if confirm != "y":
+        print("❌ Operation cancelled.")
+        return
+
+    print("\n🚚 Processing...\n")
+    success = 0
+
+    for src in matches:
+        name = os.path.basename(src)
+        dest_path = unique_dest_path(dest_dir, name)
+
+        try:
+            if mode == "1":  # Move
+                shutil.move(src, dest_path)
+            else:  # Copy
+                if os.path.isdir(src):
+                    shutil.copytree(src, dest_path)
+                else:
+                    shutil.copy2(src, dest_path)
+
+            print(f"✅ {name} → {dest_path}")
+            success += 1
+        except Exception as e:
+            print(f"❌ Failed: {src} ({e})")
+
+    print("\n================= SUMMARY =================")
+    print(f"Completed   : {success}")
+    print(f"Finished At : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("==========================================")
+    print("🎉 Done.")
+
+
+if __name__ == "__main__":
+    main()
