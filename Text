@@ -1,17 +1,1 @@
-Hi All,
-
-Thank you, Philipp, for your help in increasing the hardware power and restoring the cronjob. However, the watchdog is still unable to start the STEPP module.
-
-I have manually started the STEPP module for STEPP Line 1, Line 2, and Line 6.
-
-From my monitoring, STEPP Line 1 is now able to process files in the STEPP-EBS67 directory:
-/srv/ebsstepp/data/STEPP/input1_LCY_RES
-
-Before the hardware power increase, the number of files in this directory was around 9,000, and it has now reduced to approximately 8,700.
-
-From my perspective, the processing speed is still not fast enough to clear the backlog efficiently.
-
-Would it be possible to add more STEPP lines for LCY_RES to help process the backlog data faster?
-
-Best regards,
-Aphiwat D.
+Christian, I will check the backlog issue with Atiqah and Michelle tomorrow. Sorry for the inconvenience, as I’m still quite new to the STEPP server. I have to log off now since it’s quite late on my side.
